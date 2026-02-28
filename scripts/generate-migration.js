@@ -1,3 +1,28 @@
+/**
+ * Migration Generator Wrapper
+ *
+ * This script addresses a known TypeORM limitation where migration generation
+ * produces DROP COLUMN + ADD COLUMN operations instead of MODIFY COLUMN for
+ * column type/length changes, which can result in data loss.
+ *
+ * Related Issues & PRs:
+ * - https://github.com/typeorm/typeorm/issues/3357 (Main issue, open since 2019)
+ * - https://github.com/typeorm/typeorm/pull/11922 (Postgres fix attempt)
+ * - https://github.com/typeorm/typeorm/pull/11966 (Multi-driver fix attempt)
+ * - https://github.com/typeorm/typeorm/pull/11974 (Postgres length changes fix)
+ * - https://github.com/typeorm/typeorm/pull/11997 (ALTER COLUMN fix)
+ * - https://github.com/typeorm/typeorm/pull/12032 (Comprehensive fix for 5 drivers)
+ *
+ * This wrapper automatically corrects generated migrations by replacing
+ * destructive DROP+ADD patterns with safe MODIFY COLUMN operations when
+ * applicable (same table and column name).
+ *
+ * Note: This issue affects both MySQL and PostgreSQL, despite common misconceptions.
+ * The problem is in TypeORM's column diff logic, not database-specific behavior.
+ *
+ * @see https://github.com/typeorm/typeorm/issues/3357
+ */
+
 const { execSync } = require('child_process');
 const path = require('path');
 
@@ -21,7 +46,7 @@ try {
     process.exit(0);
   }
 
-  // Corrige automaticamente DROP + ADD por MODIFY COLUMN
+  // Automatically corrects DROP + ADD to MODIFY COLUMN
   try {
     const fs = require('fs');
     const migrationFiles = fs
@@ -33,15 +58,15 @@ try {
       let content = fs.readFileSync(filePath, 'utf-8');
       const originalContent = content;
 
-      // Padrão: DROP COLUMN seguido de ADD COLUMN (mesma coluna, mesma tabela)
-      // Captura linhas com backticks escapados: \`posts\`
+      // Pattern: DROP COLUMN followed by ADD COLUMN (same column, same table)
+      // Captures lines with escaped backticks: \`posts\`
       const dropAddPattern =
         /await queryRunner\.query\(`ALTER TABLE \\`([^\\`]+)\\` DROP COLUMN \\`([^\\`]+)\\``\);\s*await queryRunner\.query\(`ALTER TABLE \\`([^\\`]+)\\` ADD \\`([^\\`]+)\\`\s+([^`]+)`\);/g;
 
       content = content.replace(
         dropAddPattern,
         (match, table1, col1, table2, col2, colDef) => {
-          // Verifica se é a mesma tabela e mesma coluna
+          // Verifies if it's the same table and same column
           if (table1 === table2 && col1 === col2) {
             return `        await queryRunner.query(\`ALTER TABLE \\\`${table1}\\\` MODIFY COLUMN \\\`${col1}\\\` ${colDef}\`);`;
           }
